@@ -5,6 +5,20 @@ image:
 
 imagePullSecrets: []
 
+# CDI (Container Device Interface) mode. Requires a CDI-aware runtime
+# (containerd 1.7+/2.x or CRI-O). When enabled, the plugin writes CDI specs to
+# specDir and Allocate returns qualified CDI device names instead of raw nodes.
+cdi:
+  enabled: false
+  specDir: /var/run/cdi
+
+# Device health tuning.
+health:
+  # Optional stricter temperature limit in whole degrees Celsius. Empty means
+  # use the card's own sysfs temp1_max. A device at/above the limit is marked
+  # Unhealthy so the scheduler stops placing pods on it.
+  tempMaxC: ""
+
 resources:
   limits:
     cpu: 100m

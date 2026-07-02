@@ -36,6 +36,18 @@ func Heartbeat(d Device) (string, error) {
 	return readSysfs(filepath.Join(d.SysfsDir, "tt_heartbeat"))
 }
 
+// Temperature reads the current ASIC temperature in millidegrees Celsius
+// (e.g. 47875 == 47.875 C) from the hwmon temp1_input sensor.
+func Temperature(d Device) (int64, error) {
+	return readSysfsInt(filepath.Join(d.HwmonDir, "temp1_input"))
+}
+
+// MaxTemperature reads the card's hardware temperature limit in millidegrees
+// Celsius from hwmon temp1_max. Returns an error if the card does not expose it.
+func MaxTemperature(d Device) (int64, error) {
+	return readSysfsInt(filepath.Join(d.HwmonDir, "temp1_max"))
+}
+
 // Discover returns devices grouped by resource class using the real host paths.
 func Discover() (map[string][]Device, error) {
 	return discover(devDir, sysfsBase)
@@ -108,6 +120,14 @@ func readSysfs(path string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+func readSysfsInt(path string) (int64, error) {
+	s, err := readSysfs(path)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(s, 10, 64)
 }
 
 func readNumaNode(path string) int64 {
