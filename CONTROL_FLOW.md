@@ -82,12 +82,12 @@ flowchart TD
   end
 
   SP --> WATCH["go watchKubelet(ctx, restart)"]
-  WATCH --> BLOCK["&lt;-ctx.Done()"]
+  WATCH --> BLOCK["block until ctx.Done()"]
   BLOCK --> SHUT["Shutting down:<br/>p.Stop() for each plugin"]
   SHUT --> END([exit])
 
-  GORUN -.spawns.-> RUNREF["Run() — see section 2"]
-  WATCH -.on kubelet.sock recreated.-> RSTREF["restart — see section 5"]
+  GORUN -.->|spawns| RUNREF["Run() — see section 2"]
+  WATCH -.->|on kubelet.sock recreated| RSTREF["restart — see section 5"]
 ```
 
 ## 2. Per-plugin Run() — serve, wait, register

@@ -83,8 +83,8 @@ flowchart TB
     SH["Device sharing / partitioning<br/>(if hardware supports)"]
   end
   PH1 --> PH2
-  PH1 -. reuses CDI .-> PH3
-  PH2 -. bundles .-> PH3
+  PH1 -.->|reuses CDI| PH3
+  PH2 -.->|bundles| PH3
 ```
 
 ### Phase 1 — Device plugin baseline (now)
