@@ -38,6 +38,13 @@ flowchart LR
   K -->|5 CDIDevices via CRI| RT
   RT -->|reads| S
   RT --> C
+
+  classDef proc fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef ext fill:#eef2ff,stroke:#6366f1,color:#312e81;
+  class D,H,A proc;
+  class S,C good;
+  class K,RT ext;
 ```
 
 **Done and at/above vendor parity:**
@@ -85,6 +92,13 @@ flowchart TB
   PH1 --> PH2
   PH1 -.->|reuses CDI| PH3
   PH2 -.->|bundles| PH3
+
+  classDef now fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef soon fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef later fill:#ede9fe,stroke:#7c3aed,color:#4c1d95;
+  class M,B now;
+  class NFD,LC soon;
+  class DRV,SH later;
 ```
 
 ### Phase 1 — Device plugin baseline (now)
@@ -132,6 +146,15 @@ flowchart TD
   DP --> OUT["Container gets device"]
   DP2 --> OUT
   DRA --> OUT
+
+  classDef dec fill:#fef3c7,stroke:#d97706,color:#78350f;
+  classDef proc fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef later fill:#ede9fe,stroke:#7c3aed,color:#4c1d95;
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class Q,NEED dec;
+  class DP,DP2 proc;
+  class DRA later;
+  class OUT good;
 ```
 
 **Rule of thumb:** the device plugin is the compatibility floor and stays the

@@ -48,6 +48,15 @@ flowchart TB
   PLG <-->|"gRPC over unix socket"| KUBELET
   KUBELET -->|CDIDevices via CRI| RT
   RT -->|reads| CDISPEC
+
+  classDef entry fill:#7c3aed,color:#fff,stroke:#4c1d95;
+  classDef proc fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef ext fill:#eef2ff,stroke:#6366f1,color:#312e81;
+  class MAIN entry;
+  class DEV,CDIP,PLG proc;
+  class DEVFS,SYSFS,CDISPEC good;
+  class KUBELET,RT ext;
 ```
 
 **Responsibilities:**
@@ -61,6 +70,54 @@ flowchart TB
 
 Deployed as a DaemonSet via the Helm chart in [helm/tt-device-plugin](helm/tt-device-plugin);
 `device`/`sys`/`cdi` host paths are mounted in (see [PREREQUISITES.md](PREREQUISITES.md)).
+
+## End-to-end sequence
+
+From plugin registration to a running GPU-equivalent container, across the
+control plane, node, and hardware. (TT uses CDI + containerd for injection —
+no separate container-runtime shim like NVIDIA's.)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    box rgb(243,244,246) Control plane
+        participant API as kube-apiserver
+        participant SCH as scheduler
+    end
+    box rgb(219,234,254) Node
+        participant KUBE as kubelet
+        participant DP as tt-device-plugin
+        participant RT as containerd / CRI
+    end
+    box rgb(237,233,254) Hardware
+        participant HW as TT card + tt-kmd
+    end
+
+    Note over DP: discover /dev/tenstorrent + /sys
+
+    rect rgb(254,243,199)
+        Note right of DP: device-plugin gRPC
+        DP->>KUBE: Register (resource, socket)
+        DP-->>KUBE: ListAndWatch (devices + health, streamed)
+    end
+    KUBE->>API: node status: tenstorrent.com/n150 allocatable
+
+    API->>SCH: pod requesting tenstorrent.com/n150 is pending
+    SCH->>API: assign pod to node
+    API-->>KUBE: watch: pod assigned
+
+    rect rgb(220,252,231)
+        Note right of DP: allocation
+        KUBE->>DP: Allocate (device IDs)
+        Note over DP: write CDI spec → /var/run/cdi
+        DP-->>KUBE: CdiDevices (or device nodes + mounts)
+    end
+
+    KUBE->>RT: CRI CreateContainer (CDIDevices)
+    RT->>HW: open /dev/tenstorrent, mount /sys
+    HW-->>RT: device ready
+    RT-->>KUBE: container started
+```
 
 ## 1. Process startup & lifecycle
 
@@ -88,6 +145,17 @@ flowchart TD
 
   GORUN -.->|spawns| RUNREF["Run() — see section 2"]
   WATCH -.->|on kubelet.sock recreated| RSTREF["restart — see section 5"]
+
+  classDef entry fill:#7c3aed,color:#fff,stroke:#4c1d95;
+  classDef proc fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef dec fill:#fef3c7,stroke:#d97706,color:#78350f;
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef err fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class START,END,RUNREF,RSTREF entry;
+  class INIT,SP,LOOP,NEW,GORUN,WATCH,BLOCK,SHUT proc;
+  class CHK,CDIQ dec;
+  class DISC,WSPEC good;
+  class FATAL err;
 ```
 
 ## 2. Per-plugin Run() — serve, wait, register
@@ -118,6 +186,17 @@ flowchart TD
   LOGS --> SEL{"select"}
   SEL -->|ctx.Done| RETOK["return nil"]
   SEL -->|stop closed| RETOK
+
+  classDef entry fill:#7c3aed,color:#fff,stroke:#4c1d95;
+  classDef proc fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef dec fill:#fef3c7,stroke:#d97706,color:#78350f;
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef err fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class RUN entry;
+  class RM,SERVE,LIS,GS,STORE,GOSERVE,WR,REG,REGC,LOGS proc;
+  class CTXQ,WRL,SEL dec;
+  class RET1,RET2,RET3 err;
+  class RETOK good;
 ```
 
 ## 3. gRPC serving — ListAndWatch & Allocate
@@ -147,6 +226,15 @@ flowchart TD
     ACDI --> ADONE["append ContainerAllocateResponse"]
     ALEG --> ADONE
   end
+
+  classDef proc fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef dec fill:#fef3c7,stroke:#d97706,color:#78350f;
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef err fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class LW0,TICK,LWSEND,A0,ACC,AENV,ACDI,ALEG,ADONE proc;
+  class TSEL,AV,AMODE dec;
+  class LWEND good;
+  class AERR err;
 ```
 
 ## 4. checkHealth decision flow
@@ -173,6 +261,17 @@ flowchart TD
   HBR --> HBP{"prev == current?"}
   HBP -->|yes| UNH3["Unhealthy<br/>(heartbeat stalled)"]
   HBP -->|no| OK
+
+  classDef entry fill:#7c3aed,color:#fff,stroke:#4c1d95;
+  classDef proc fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef dec fill:#fef3c7,stroke:#d97706,color:#78350f;
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef err fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class H entry;
+  class HW,TREAD,LIM,CMP,HB,HBP dec;
+  class TEMP,SYS,HBR proc;
+  class OK good;
+  class UNH1,UNH2,UNH3 err;
 ```
 
 ## 5. Kubelet restart & shutdown
@@ -196,6 +295,13 @@ flowchart TD
     CLOSE --> GRACE["GracefulStop<br/>(force Stop after 5s)"]
     GRACE --> RMS["removeSocket"]
   end
+
+  classDef proc fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef dec fill:#fef3c7,stroke:#d97706,color:#78350f;
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class FS,RCB,STOPALL,RESP,CLOSE,GRACE,RMS proc;
+  class EV,C1 dec;
+  class WKEND,SRET good;
 ```
 
 ## Key invariants
