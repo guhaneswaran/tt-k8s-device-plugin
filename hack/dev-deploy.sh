@@ -4,12 +4,17 @@
 #   check (ci.yml) -> build -> load -> prune -> helm upgrade --install
 #   -> verify discovery -> hardware verify (tt-smi on the card).
 #
+# CDI mode is ON by default (needs a CDI-aware runtime: containerd 1.7+/2.x or
+# CRI-O). Use --no-cdi for the legacy device-node/mount path.
+#
 # Flags:
+#   --no-cdi      deploy the legacy path (cdi.enabled=false)
 #   --no-check    skip the local CI gate (check.sh)
 #   --no-probe    skip the hardware verify (tt-verify-hw.sh)
 #   -h, --help    show this help
 #
 # Env:
+#   CDI=0         same as --no-cdi
 #   SKIP_CHECK=1  same as --no-check       SKIP_BUILD=1  reuse last loaded image
 #   KEEP_IMAGES=N keep N dev images + helm revisions (default 2)
 #   IMAGE_NAME / NAMESPACE / RESOURCE / RELEASE / NODE  override defaults
@@ -42,9 +47,12 @@ VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 
 DO_PROBE=1
 DO_CHECK=1
+DO_CDI=1
 [[ "${SKIP_CHECK:-0}" == "1" ]] && DO_CHECK=0
+[[ "${CDI:-1}" == "0" ]] && DO_CDI=0
 while (( $# )); do
   case "$1" in
+    --no-cdi)   DO_CDI=0 ;;
     --no-probe) DO_PROBE=0 ;;
     --no-check) DO_CHECK=0 ;;
     -h|--help)  usage; exit 0 ;;
@@ -52,6 +60,10 @@ while (( $# )); do
   esac
   shift
 done
+
+# CDI spec file the plugin writes on the node, derived from the resource class.
+RESOURCE_CLASS="${RESOURCE##*/}"
+CDI_SPEC="/var/run/cdi/tenstorrent-${RESOURCE_CLASS}.json"
 
 trap 'rc=$?; (( rc )) && printf "\n  %s✗ aborted%s (exit %d)\n" "${RED}${BOLD}" "${RESET}" "${rc}" >&2' ERR
 
@@ -66,6 +78,7 @@ kv "version"      "${VERSION}"
 kv "helm release" "${RELEASE}"
 kv "resource"     "${RESOURCE}"
 kv "namespace"    "${NAMESPACE}"
+kv "mode"         "$( (( DO_CDI )) && echo CDI || echo legacy )"
 
 # ---- prerequisites ----------------------------------------------------------
 step "Checking prerequisites"
@@ -78,6 +91,15 @@ ok "minikube is running"
 docker exec "${NODE}" test -e /dev/tenstorrent/0 2>/dev/null \
   || fail "/dev/tenstorrent/0 not present inside the ${NODE} node — device passthrough missing"
 ok "n150 visible inside ${NODE} node"
+# CDI needs a CDI-aware runtime; docker/cri-dockerd silently ignores CDI devices,
+# so the container would come up with no device. Catch that before deploying.
+if (( DO_CDI )); then
+  RUNTIME="$(kubectl get node "${NODE}" -o jsonpath='{.status.nodeInfo.containerRuntimeVersion}' 2>/dev/null || true)"
+  case "${RUNTIME}" in
+    containerd://*|cri-o://*) ok "CDI-aware runtime: ${RUNTIME}" ;;
+    *) fail "CDI requested but node runtime is '${RUNTIME:-unknown}' — needs containerd 1.7+/2.x or CRI-O (recreate: minikube delete && minikube start --container-runtime=containerd)" ;;
+  esac
+fi
 
 # ---- pre-flight: local CI checks --------------------------------------------
 if (( DO_CHECK )); then
@@ -126,6 +148,7 @@ run_dim helm upgrade --install "${RELEASE}" "${CHART_DIR}" \
   --set image.repository="${IMAGE_NAME}" \
   --set image.tag="${IMAGE_TAG}" \
   --set image.pullPolicy=IfNotPresent \
+  --set cdi.enabled="$( (( DO_CDI )) && echo true || echo false )" \
   --history-max "${KEEP_IMAGES}" \
   --wait --timeout 120s || fail "helm upgrade failed"
 ok "Helm release deployed"
@@ -139,6 +162,16 @@ if ALLOC="$(wait_for_allocatable "${NODE}" "${RESOURCE}" 30)"; then
   ok "node advertises ${BOLD}${RESOURCE} = ${ALLOC}${RESET}"
 else
   fail "node does not advertise ${RESOURCE} after 60s — check plugin logs above"
+fi
+
+# In CDI mode the plugin must have written its spec where the runtime reads it;
+# without it, Allocate hands out names the runtime cannot resolve.
+if (( DO_CDI )); then
+  if docker exec "${NODE}" test -f "${CDI_SPEC}" 2>/dev/null; then
+    ok "CDI spec present on node: ${BOLD}${CDI_SPEC}${RESET}"
+  else
+    fail "CDI spec ${CDI_SPEC} not found on node — check plugin logs above"
+  fi
 fi
 
 # ---- hardware verify --------------------------------------------------------

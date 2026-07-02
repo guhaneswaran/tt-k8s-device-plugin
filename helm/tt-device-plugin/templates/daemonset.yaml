@@ -42,6 +42,17 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          {{- if or .Values.cdi.enabled .Values.health.tempMaxC }}
+          env:
+            {{- if .Values.cdi.enabled }}
+            - name: TT_CDI_ENABLED
+              value: "true"
+            {{- end }}
+            {{- if .Values.health.tempMaxC }}
+            - name: TT_TEMP_MAX_C
+              value: {{ .Values.health.tempMaxC | quote }}
+            {{- end }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -56,6 +67,10 @@ spec:
             - name: hugepages
               mountPath: /dev/hugepages-1G
               readOnly: true
+            {{- if .Values.cdi.enabled }}
+            - name: cdi
+              mountPath: {{ .Values.cdi.specDir }}
+            {{- end }}
       volumes:
         - name: device-plugins
           hostPath:
@@ -73,3 +88,9 @@ spec:
           hostPath:
             path: /dev/hugepages-1G
             type: DirectoryOrCreate
+        {{- if .Values.cdi.enabled }}
+        - name: cdi
+          hostPath:
+            path: {{ .Values.cdi.specDir }}
+            type: DirectoryOrCreate
+        {{- end }}

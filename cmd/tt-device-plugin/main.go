@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -11,6 +12,7 @@ import (
 	"k8s.io/klog/v2"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
+	"github.com/guhaneswaran/tt-k8s-device-plugin/internal/cdi"
 	"github.com/guhaneswaran/tt-k8s-device-plugin/internal/device"
 	"github.com/guhaneswaran/tt-k8s-device-plugin/internal/plugin"
 )
@@ -63,6 +65,16 @@ func startPlugins(ctx context.Context) ([]*plugin.Plugin, error) {
 	}
 	if len(grouped) == 0 {
 		return nil, fmt.Errorf("no Tenstorrent devices found")
+	}
+
+	if os.Getenv("TT_CDI_ENABLED") == "true" {
+		for class, devs := range grouped {
+			if err := cdi.WriteSpec(cdi.DefaultSpecDir, class, devs, plugin.HugepagesPath); err != nil {
+				klog.Errorf("Failed to write CDI spec for %s: %v", class, err)
+			} else {
+				klog.Infof("Wrote CDI spec for %s (%d devices) to %s", class, len(devs), cdi.DefaultSpecDir)
+			}
+		}
 	}
 
 	plugins := make([]*plugin.Plugin, 0, len(grouped))
