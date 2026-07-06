@@ -1,0 +1,38 @@
+schema: spec-driven
+
+# Project context — shown to the AI when creating artifacts.
+context: |
+  Project: Kubernetes device plugin for Tenstorrent AI accelerators
+  (github.com/guhaneswaran/tt-k8s-device-plugin).
+
+  Tech stack:
+  - Go 1.25. Module k8s.io/kubelet v0.35.3 (Device Plugin API v1beta1), gRPC.
+  - Layout: cmd/tt-device-plugin (main/wiring), internal/device (host discovery +
+    sysfs reads), internal/plugin (gRPC DevicePluginServer, lifecycle, health,
+    Allocate), internal/cdi (CDI spec generation).
+  - Deployed as a DaemonSet via a Helm chart (helm/tt-device-plugin). Runs
+    non-privileged (drop ALL caps, read-only rootfs).
+  - Dev env: minikube on containerd 2.x, single Tenstorrent n150 card.
+
+  Conventions:
+  - Idiomatic Go: errors as values with fmt.Errorf("...: %w", err) wrapping;
+    klog for logging; table-driven tests with fake-sysfs temp dirs (see
+    internal/device/discover_test.go); dependency injection for testability.
+  - Health is pull-based and recovers (re-evaluated every 30s in ListAndWatch).
+  - CDI is opt-in via TT_CDI_ENABLED; legacy device-node/mount path is default.
+  - CI (ci.yml) must stay green: go build/vet/test -race, golangci-lint, helm lint.
+  - Commits: NO "Co-Authored-By" trailer.
+
+  Direction: device plugin is the compatibility baseline; DRA (GA in K8s 1.34)
+  is the strategic successor and reuses CDI. See ROADMAP.md and RESEARCH.md.
+  This work will be shown to Tenstorrent for feedback, so specs should be clear
+  and reviewable.
+
+# Per-artifact rules.
+rules:
+  proposal:
+    - Keep it concise and reviewable; include a "Non-goals" section.
+    - Ground rationale in how the existing plugin works and in the roadmap.
+  tasks:
+    - Break work into small, verifiable steps.
+    - Include a test task and keep CI (build/vet/test -race, golangci-lint) green.
