@@ -212,3 +212,59 @@ func TestAllocateUnknownDevice(t *testing.T) {
 		t.Fatal("expected error for unknown device ID, got nil")
 	}
 }
+
+func TestAllocationsCounter(t *testing.T) {
+	p := New("n150", []device.Device{{ID: "0", DevPath: "/dev/tenstorrent/0"}})
+	if got := p.Allocations(); got != 0 {
+		t.Fatalf("initial allocations = %d, want 0", got)
+	}
+
+	req := &pluginapi.AllocateRequest{
+		ContainerRequests: []*pluginapi.ContainerAllocateRequest{
+			{DevicesIds: []string{"0"}},
+			{DevicesIds: []string{"0"}},
+		},
+	}
+	if _, err := p.Allocate(context.Background(), req); err != nil {
+		t.Fatalf("Allocate: %v", err)
+	}
+	if got := p.Allocations(); got != 2 {
+		t.Errorf("allocations = %d, want 2 (two containers)", got)
+	}
+}
+
+func TestSnapshotReflectsHealth(t *testing.T) {
+	hwmon := filepath.Join(t.TempDir(), "hwmon0")
+	if err := os.MkdirAll(hwmon, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, val string) {
+		if err := os.WriteFile(filepath.Join(hwmon, name), []byte(val), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("temp1_max", "75000\n")
+	write("temp1_input", "90000\n") // over the limit
+
+	p := New("n150", []device.Device{{ID: "0", HwmonDir: hwmon}})
+
+	// Seeded snapshot before any health tick: one device, healthy by default.
+	snaps := p.Snapshot()
+	if len(snaps) != 1 || !snaps[0].Healthy {
+		t.Fatalf("seeded snapshot = %+v, want 1 healthy device", snaps)
+	}
+
+	// Run a health tick; the over-temp device must read unhealthy, with temps.
+	p.buildDeviceList()
+	snaps = p.Snapshot()
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snaps))
+	}
+	s := snaps[0]
+	if s.Healthy {
+		t.Error("expected unhealthy after over-temp tick")
+	}
+	if !s.HasTemp || s.TempMilliC != 90000 || s.MaxMilliC != 75000 {
+		t.Errorf("snapshot temps wrong: %+v", s)
+	}
+}

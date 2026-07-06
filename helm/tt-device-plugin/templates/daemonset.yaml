@@ -42,7 +42,6 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-          {{- if or .Values.cdi.enabled .Values.health.tempMaxC }}
           env:
             {{- if .Values.cdi.enabled }}
             - name: TT_CDI_ENABLED
@@ -52,6 +51,18 @@ spec:
             - name: TT_TEMP_MAX_C
               value: {{ .Values.health.tempMaxC | quote }}
             {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - name: TT_METRICS_PORT
+              value: {{ .Values.metrics.port | quote }}
+            {{- else }}
+            - name: TT_METRICS_ENABLED
+              value: "false"
+            {{- end }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

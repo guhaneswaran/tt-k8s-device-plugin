@@ -64,6 +64,10 @@ if command -v helm >/dev/null 2>&1; then
   # care that it renders, not the output.
   TMPL_DIR="$(mktemp -d)"; trap 'rm -rf "${TMPL_DIR}"' EXIT
   check helm-template helm template test "${CHART_DIR}" --output-dir "${TMPL_DIR}"
+  # metrics endpoint (spec: device-metrics) renders by default, and is absent
+  # when disabled.
+  check helm-metrics-on  bash -c "helm template test '${CHART_DIR}' | grep -q 'containerPort: 9102'"
+  check helm-metrics-off bash -c "! helm template test '${CHART_DIR}' --set metrics.enabled=false | grep -q 'containerPort'"
 else
   warn "helm not installed — skipping"
   SKIPPED+=("helm")

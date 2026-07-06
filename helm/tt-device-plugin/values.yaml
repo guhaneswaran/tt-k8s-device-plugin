@@ -19,6 +19,12 @@ health:
   # Unhealthy so the scheduler stops placing pods on it.
   tempMaxC: ""
 
+# Prometheus metrics. Serves /metrics with per-device health/temperature and
+# per-class device/allocation counts.
+metrics:
+  enabled: true
+  port: 9102
+
 resources:
   limits:
     cpu: 100m

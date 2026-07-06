@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"k8s.io/klog/v2"
@@ -14,6 +18,7 @@ import (
 
 	"github.com/guhaneswaran/tt-k8s-device-plugin/internal/cdi"
 	"github.com/guhaneswaran/tt-k8s-device-plugin/internal/device"
+	"github.com/guhaneswaran/tt-k8s-device-plugin/internal/metrics"
 	"github.com/guhaneswaran/tt-k8s-device-plugin/internal/plugin"
 )
 
@@ -32,6 +37,21 @@ func main() {
 	}
 
 	var mu sync.Mutex
+
+	if metricsEnabled() {
+		// Provider reads the current plugin set under mu, so metrics follow
+		// kubelet-restart re-creation. *plugin.Plugin satisfies metrics.Source.
+		provider := func() []metrics.Source {
+			mu.Lock()
+			defer mu.Unlock()
+			srcs := make([]metrics.Source, len(plugins))
+			for i, p := range plugins {
+				srcs[i] = p
+			}
+			return srcs
+		}
+		go serveMetrics(ctx, ":"+metricsPort(), provider)
+	}
 
 	go watchKubelet(ctx, func() {
 		mu.Lock()
@@ -89,6 +109,39 @@ func startPlugins(ctx context.Context) ([]*plugin.Plugin, error) {
 		}(p, class)
 	}
 	return plugins, nil
+}
+
+// metricsEnabled reports whether the metrics server should run. Enabled unless
+// TT_METRICS_ENABLED is explicitly "false".
+func metricsEnabled() bool {
+	return os.Getenv("TT_METRICS_ENABLED") != "false"
+}
+
+// metricsPort returns the metrics port (TT_METRICS_PORT, default 9102).
+func metricsPort() string {
+	if v := strings.TrimSpace(os.Getenv("TT_METRICS_PORT")); v != "" {
+		return v
+	}
+	return "9102"
+}
+
+// serveMetrics runs the /metrics HTTP server until ctx is cancelled.
+func serveMetrics(ctx context.Context, addr string, provider func() []metrics.Source) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", metrics.Handler(provider))
+	srv := &http.Server{Addr: addr, Handler: mux}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
+	klog.Infof("Serving metrics on %s/metrics", addr)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		klog.Errorf("Metrics server error: %v", err)
+	}
 }
 
 func watchKubelet(ctx context.Context, restart func()) {

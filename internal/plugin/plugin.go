@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -43,6 +44,16 @@ const (
 	tempMaxEnv = "TT_TEMP_MAX_C"
 )
 
+// DeviceSnapshot is the last observed state of one device, cached on each health
+// tick so the metrics collector can read it without re-running the health checks.
+type DeviceSnapshot struct {
+	ID         string
+	Healthy    bool
+	HasTemp    bool  // whether a temperature reading is available
+	TempMilliC int64 // current temperature in millidegrees Celsius
+	MaxMilliC  int64 // temperature limit in millidegrees Celsius (0 if unknown)
+}
+
 // Plugin implements pluginapi.DevicePluginServer for a single resource class.
 type Plugin struct {
 	pluginapi.UnimplementedDevicePluginServer
@@ -67,9 +78,14 @@ type Plugin struct {
 	byID map[string]*device.Device
 
 	mu             sync.Mutex
-	grpcServer     *grpc.Server // guarded by mu during serve/Stop overlap
-	lastHeartbeats map[string]string
+	grpcServer     *grpc.Server              // guarded by mu during serve/Stop overlap
+	lastHeartbeats map[string]string         // guarded by mu
+	snapshots      map[string]DeviceSnapshot // guarded by mu; last state per device, for metrics
 	stop           chan struct{}
+
+	// allocations counts containers allocated; atomic so metrics can read it
+	// concurrently without taking mu.
+	allocations atomic.Uint64
 }
 
 // New constructs a Plugin for the given resource class and device list.
@@ -79,8 +95,12 @@ func New(resourceClass string, devices []device.Device) *Plugin {
 	copy(devs, devices)
 
 	byID := make(map[string]*device.Device, len(devs))
+	snapshots := make(map[string]DeviceSnapshot, len(devs))
 	for i := range devs {
 		byID[devs[i].ID] = &devs[i]
+		// Seed as healthy until the first health tick updates it, so metrics
+		// list every device from the start.
+		snapshots[devs[i].ID] = DeviceSnapshot{ID: devs[i].ID, Healthy: true}
 	}
 
 	socketName := "tenstorrent-" + resourceClass + ".sock"
@@ -95,6 +115,7 @@ func New(resourceClass string, devices []device.Device) *Plugin {
 		byID:           byID,
 		stop:           make(chan struct{}),
 		lastHeartbeats: make(map[string]string),
+		snapshots:      snapshots,
 	}
 }
 
@@ -111,6 +132,27 @@ func parseTempMaxEnv() int64 {
 		return 0
 	}
 	return c * 1000
+}
+
+// ResourceClass returns the plugin's card class (e.g. "n150").
+func (p *Plugin) ResourceClass() string { return p.resourceClass }
+
+// Allocations returns the cumulative number of containers this plugin has
+// allocated. Safe to call from any goroutine.
+func (p *Plugin) Allocations() uint64 { return p.allocations.Load() }
+
+// Snapshot returns the last observed state of each device, in stable device
+// order. Safe to call from any goroutine (e.g. a metrics scrape).
+func (p *Plugin) Snapshot() []DeviceSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]DeviceSnapshot, 0, len(p.devices))
+	for _, dev := range p.devices {
+		if s, ok := p.snapshots[dev.ID]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Run starts the plugin: removes any stale socket, starts the gRPC server,
@@ -300,6 +342,7 @@ func (p *Plugin) Allocate(_ context.Context, req *pluginapi.AllocateRequest) (*p
 		responses = append(responses, resp)
 	}
 
+	p.allocations.Add(uint64(len(responses)))
 	return &pluginapi.AllocateResponse{ContainerResponses: responses}, nil
 }
 
@@ -346,11 +389,16 @@ func (p *Plugin) PreStartContainer(context.Context, *pluginapi.PreStartContainer
 
 func (p *Plugin) buildDeviceList() []*pluginapi.Device {
 	list := make([]*pluginapi.Device, len(p.devices))
+	snaps := make(map[string]DeviceSnapshot, len(p.devices))
 	for i, dev := range p.devices {
-		d := &pluginapi.Device{
-			ID:     dev.ID,
-			Health: p.checkHealth(dev),
+		snap := p.assess(dev)
+		snaps[dev.ID] = snap
+
+		health := pluginapi.Healthy
+		if !snap.Healthy {
+			health = pluginapi.Unhealthy
 		}
+		d := &pluginapi.Device{ID: dev.ID, Health: health}
 		if dev.NumaNode >= 0 {
 			d.Topology = &pluginapi.TopologyInfo{
 				Nodes: []*pluginapi.NUMANode{{ID: dev.NumaNode}},
@@ -358,22 +406,42 @@ func (p *Plugin) buildDeviceList() []*pluginapi.Device {
 		}
 		list[i] = d
 	}
+
+	// Publish the fresh snapshots for the metrics collector to read.
+	p.mu.Lock()
+	p.snapshots = snaps
+	p.mu.Unlock()
 	return list
 }
 
-// checkHealth reports whether dev is healthy. Two independent signals:
+// checkHealth reports whether dev is healthy as a pluginapi health string.
+// It is a thin wrapper over assess.
+func (p *Plugin) checkHealth(dev device.Device) string {
+	if p.assess(dev).Healthy {
+		return pluginapi.Healthy
+	}
+	return pluginapi.Unhealthy
+}
+
+// assess computes the current health + temperature snapshot for dev. Two
+// independent signals:
 //  1. Temperature — the sensor must be readable (proxy for the driver being
 //     alive) and below the limit (sysfs temp1_max, or the TT_TEMP_MAX_C
 //     override); an over-temperature card is marked unhealthy so kubelet stops
 //     scheduling onto it.
 //  2. ARC heartbeat advancing — proxy for on-card firmware not being frozen.
-func (p *Plugin) checkHealth(dev device.Device) string {
+func (p *Plugin) assess(dev device.Device) DeviceSnapshot {
+	snap := DeviceSnapshot{ID: dev.ID, Healthy: true}
+
 	if dev.HwmonDir != "" {
 		temp, err := device.Temperature(dev)
 		if err != nil {
 			klog.Warningf("Device %s unhealthy (temp sensor unreadable): %v", dev.ID, err)
-			return pluginapi.Unhealthy
+			snap.Healthy = false
+			return snap
 		}
+		snap.HasTemp = true
+		snap.TempMilliC = temp
 
 		limit := p.tempMaxMilliC
 		if limit == 0 {
@@ -382,10 +450,12 @@ func (p *Plugin) checkHealth(dev device.Device) string {
 				limit = m
 			}
 		}
+		snap.MaxMilliC = limit
 		if limit > 0 && temp >= limit {
 			klog.Warningf("Device %s unhealthy (temperature %.1fC >= limit %.1fC)",
 				dev.ID, float64(temp)/1000, float64(limit)/1000)
-			return pluginapi.Unhealthy
+			snap.Healthy = false
+			return snap
 		}
 	}
 
@@ -398,12 +468,13 @@ func (p *Plugin) checkHealth(dev device.Device) string {
 
 			if hasPrev && prev == hb {
 				klog.Warningf("Device %s unhealthy (heartbeat stalled at %s)", dev.ID, hb)
-				return pluginapi.Unhealthy
+				snap.Healthy = false
+				return snap
 			}
 		}
 	}
 
-	return pluginapi.Healthy
+	return snap
 }
 
 func removeSocket(path string) error {
