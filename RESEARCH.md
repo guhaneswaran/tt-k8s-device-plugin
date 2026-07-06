@@ -157,7 +157,7 @@ Legend: ✅ full · 🟡 partial/experimental · ❌ none.
 | Sharing: spatial (MPS) | ✅ | 🟡 | 🟡 | ❌ |
 | Hardware partitioning | ✅ MIG | 🟡 (MI300) | 🟡 (SR-IOV) | ❌ (hw-dependent) |
 | NFD / node labeling | ✅ | ✅ | ✅ | ❌ |
-| Prometheus metrics | ✅ (DCGM) | ✅ (exporter) | 🟡 | ❌ |
+| Prometheus metrics | ✅ (DCGM) | ✅ (exporter) | 🟡 | 🟡 (basic, in-plugin) |
 | Operator | ✅ (GPU Operator) | 🟡 | ✅ | ❌ |
 | DRA driver | ✅ | ✅ | 🟡 | ❌ |
 
@@ -172,6 +172,55 @@ Legend: ✅ full · 🟡 partial/experimental · ❌ none.
   (GPU/FPGA/QAT/…); GPU plugin supports CDI but calls it no-benefit-yet.
 - **Hot-plug: none of the three do runtime add/remove** — startup + kubelet-restart
   re-discovery is the industry norm.
+
+### 4a. Observability: who owns "free capacity" vs. telemetry
+
+A recurring confusion: the device plugin **cannot** report how many devices are
+*free*. The device-plugin gRPC API (`Register`, `ListAndWatch`, `Allocate`,
+`GetPreferredAllocation`, `PreStartContainer`) has **no release/`Deallocate`
+callback** — kubelet tells the plugin when a device is handed out but never when a
+pod exits and returns it. So the plugin sees allocations flow out and never sees
+them come back; it has no accurate "in-use / free" state to expose. This is a
+Kubernetes API constraint, so it applies identically to NVIDIA, AMD, Intel, and us.
+
+Kubelet owns the allocation ledger. Therefore **free capacity is a Kubernetes
+question, not a plugin metric**, observed the same way for every vendor:
+
+```
+free = allocatable − sum(requests of running pods)
+```
+
+- **kubectl:** `kubectl describe node <n> | grep -A6 "Allocated resources"` —
+  compare `Allocatable` vs `Requests` for `tenstorrent.com/n150`.
+- **Prometheus (fleet):** via **kube-state-metrics** (reads the API server, not the
+  plugin):
+  ```promql
+  kube_node_status_allocatable{resource="tenstorrent_com_n150"}
+    - on(node) sum by (node) (
+        kube_pod_container_resource_requests{resource="tenstorrent_com_n150"}
+      )
+  ```
+
+Consequently, our `tt_allocations_total` is a **counter** (cumulative allocation
+*churn*, read via `rate()`), not a free-capacity gauge — it answers "how much
+allocation activity," not "how many are free." Those are different questions.
+
+**Telemetry is a separate component across all three vendors.** None fold rich
+device metrics into the device plugin; each ships a dedicated exporter:
+
+| Vendor | Allocation (device plugin) | Telemetry (separate exporter) |
+|--------|----------------------------|-------------------------------|
+| NVIDIA | `k8s-device-plugin`        | **DCGM-exporter** (util, mem, power, ECC, temp) |
+| AMD    | ROCm device plugin         | **device-metrics-exporter** (gRPC socket) |
+| Intel  | GPU plugin (operator)      | **xpumanager** exporter |
+| TT     | `tt-device-plugin`         | *basic health/temp bundled inline (this project)* |
+
+We deliberately fold **basic** health + temperature + allocation-churn into the
+plugin (one binary, single-card scope). The vendor-aligned evolution is to split
+telemetry into a `tt-metrics-exporter` (DCGM-style) once real utilization / power /
+memory metrics are wanted, keeping the plugin lean and single-purpose. "Free cards"
+stays a kube-state-metrics query regardless — this is a validated design choice, not
+a gap.
 
 ---
 
