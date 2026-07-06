@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug tests (current package)",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${fileDirname}"
+    },
+    {
+      "name": "Debug a specific test (prompt)",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${fileDirname}",
+      "args": ["-test.run", "${input:testName}", "-test.v"]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "testName",
+      "type": "promptString",
+      "description": "Test name regex, e.g. TestDiscoverSingleBlackhole"
+    }
+  ]
+}
