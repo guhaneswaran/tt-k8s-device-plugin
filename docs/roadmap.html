@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TT Device Plugin — Roadmap</title>
+<style>
+  :root {
+    --bg:#f5f7fa; --surface:#ffffff; --ink:#171b22; --muted:#5c6674; --hair:#e5e9f0; --rail:#cdd4de;
+    --shadow:0 1px 2px rgba(20,28,45,.05),0 8px 22px -14px rgba(20,28,45,.22);
+    --brand:#6d54e0; --brand-soft:#e9e4fb;
+    --done:#0f9488; --done-soft:#e4f4f2;
+    --plan:#64748b; --plan-soft:#eef1f5;
+    --panel:#ece9f8; --panel-bd:#ddd7f2;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1017; --surface:#161b24; --ink:#e7ebf2; --muted:#9aa4b3; --hair:#222a35; --rail:#2c3542;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -16px rgba(0,0,0,.7);
+      --brand:#9d86ff; --brand-soft:#251d47; --done:#2fb8ab; --done-soft:#122f2b; --plan:#8b97a8; --plan-soft:#1c232e;
+      --panel:#161234; --panel-bd:#2a2350; }
+  }
+  :root[data-theme="light"] { --bg:#f5f7fa;--surface:#fff;--ink:#171b22;--muted:#5c6674;--hair:#e5e9f0;--rail:#cdd4de;
+    --shadow:0 1px 2px rgba(20,28,45,.05),0 8px 22px -14px rgba(20,28,45,.22);
+    --brand:#6d54e0;--brand-soft:#e9e4fb;--done:#0f9488;--done-soft:#e4f4f2;--plan:#64748b;--plan-soft:#eef1f5;--panel:#ece9f8;--panel-bd:#ddd7f2; }
+  :root[data-theme="dark"] { --bg:#0d1017;--surface:#161b24;--ink:#e7ebf2;--muted:#9aa4b3;--hair:#222a35;--rail:#2c3542;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -16px rgba(0,0,0,.7);
+    --brand:#9d86ff;--brand-soft:#251d47;--done:#2fb8ab;--done-soft:#122f2b;--plan:#8b97a8;--plan-soft:#1c232e;--panel:#161234;--panel-bd:#2a2350; }
+
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); -webkit-font-smoothing:antialiased; line-height:1.5; }
+  .wrap { max-width:1180px; margin:0 auto; padding:clamp(28px,5vw,58px) clamp(16px,4vw,40px) 54px; }
+
+  header { margin-bottom:clamp(26px,4.2vw,44px); }
+  .eyebrow { font-size:12px; font-weight:700; letter-spacing:.18em; text-transform:uppercase; color:var(--brand); margin:0 0 12px; }
+  h1 { font-size:clamp(18px,5.2vw,44px); line-height:1.1; letter-spacing:-.02em; font-weight:800; margin:0; white-space:nowrap; }
+
+  .panel { background:var(--panel); border:1px solid var(--panel-bd); border-radius:22px; padding:clamp(18px,2.6vw,32px); }
+  .board { position:relative; display:grid; grid-template-columns:repeat(4,1fr); gap:clamp(12px,1.6vw,22px); --num-h:40px; --dot-band:26px; }
+  .board::before { content:""; position:absolute; z-index:0; top:calc(var(--num-h) + var(--dot-band)/2 - 1px); left:11%; right:11%; height:2px; border-radius:2px; background:var(--rail); }
+
+  .col { position:relative; z-index:1; display:flex; flex-direction:column; }
+  .num { height:var(--num-h); display:flex; align-items:center; justify-content:center; font-size:29px; font-weight:800; color:var(--brand); font-variant-numeric:tabular-nums; }
+  .dotband { height:var(--dot-band); display:flex; align-items:center; justify-content:center; }
+  .dot { width:15px; height:15px; border-radius:50%; background:var(--surface); border:3px solid var(--brand); box-shadow:0 0 0 4px var(--panel); }
+  .horizon { text-align:center; font-size:10.5px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:9px 0 0; }
+
+  .cathead { display:flex; flex-direction:column; align-items:center; gap:8px; margin:12px 0 12px; min-height:74px; }
+  .cicon { width:36px; height:36px; border-radius:10px; background:var(--brand-soft); color:var(--brand); display:flex; align-items:center; justify-content:center; }
+  .cicon svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .cname { font-size:14px; font-weight:700; letter-spacing:-.01em; line-height:1.2; text-align:center; }
+
+  .stack { display:flex; flex-direction:column; gap:10px; flex:1; background:var(--surface); border:1px solid var(--hair); border-radius:16px; padding:12px; box-shadow:var(--shadow); }
+
+  .fbox { position:relative; background:var(--cs); border:1px solid var(--c); border-left:4px solid var(--c);
+    border-radius:11px; padding:13px 34px 13px 13px; transition:transform .15s ease, box-shadow .15s ease; --c:var(--plan); --cs:var(--plan-soft); }
+  .fbox:hover { transform:translateY(-2px); box-shadow:0 2px 4px rgba(20,28,45,.08),0 14px 30px -16px rgba(20,28,45,.4); }
+  .fbox.done { --c:var(--done); --cs:var(--done-soft); }
+  .fbox.plan { --c:var(--plan); --cs:var(--plan-soft); }
+  .ft { font-size:13.5px; font-weight:600; color:var(--ink); line-height:1.3; }
+  .badge { position:absolute; top:50%; right:11px; transform:translateY(-50%); width:18px; height:18px; border-radius:50%; background:var(--done); display:flex; align-items:center; justify-content:center; }
+  .badge svg { width:11px; height:11px; stroke:#fff; stroke-width:2.6; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+
+  .legend { margin-top:clamp(26px,4vw,40px); padding-top:20px; border-top:1px solid var(--hair); display:flex; flex-wrap:wrap; align-items:center; gap:12px 24px; }
+  .legend .key { display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
+  .legend .sw { width:14px; height:14px; border-radius:4px; border:1px solid; }
+  .k-done .sw { background:var(--done-soft); border-color:var(--done); }
+  .k-plan .sw { background:var(--plan-soft); border-color:var(--plan); }
+  .principle { margin:20px 0 0; font-size:13px; color:var(--muted); line-height:1.55; border-left:3px solid var(--brand); padding-left:14px; max-width:92ch; }
+  .principle b { color:var(--ink); font-weight:600; }
+
+  @media (max-width:900px){ .board{grid-template-columns:repeat(2,1fr);} .board::before{display:none;} }
+  @media (max-width:520px){ .board{grid-template-columns:1fr;} .num,.dotband{justify-content:flex-start;} .dotband{padding-left:6px;} .horizon{text-align:left;} .cathead{flex-direction:row; min-height:0; justify-content:flex-start;} .cname{text-align:left;} }
+  @media (prefers-reduced-motion:no-preference){
+    .col{animation:rise .5s cubic-bezier(.2,.7,.2,1) both;}
+    .col:nth-child(1){animation-delay:.04s}.col:nth-child(2){animation-delay:.11s}.col:nth-child(3){animation-delay:.18s}.col:nth-child(4){animation-delay:.25s}
+    @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Project Roadmap</p>
+    <h1>Tenstorrent Kubernetes Enablement</h1>
+  </header>
+
+  <div class="panel">
+  <div class="board">
+
+    <!-- 01 -->
+    <div class="col">
+      <div class="num">01</div>
+      <div class="dotband"><span class="dot"></span></div>
+      <div class="horizon">Now</div>
+      <div class="cathead">
+        <span class="cicon"><svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>
+        <span class="cname">Device Plugin Baseline</span>
+      </div>
+      <div class="stack">
+        <div class="fbox done"><span class="badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="ft">Core device-plugin API</div></div>
+        <div class="fbox done"><span class="badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="ft">Dynamic discovery &amp; allocation</div></div>
+        <div class="fbox done"><span class="badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="ft">CDI injection</div></div>
+        <div class="fbox done"><span class="badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="ft">Health + auto-recovery</div></div>
+        <div class="fbox done"><span class="badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="ft">Helm packaging</div></div>
+      </div>
+    </div>
+
+    <!-- 02 -->
+    <div class="col">
+      <div class="num">02</div>
+      <div class="dotband"><span class="dot"></span></div>
+      <div class="horizon">Next</div>
+      <div class="cathead">
+        <span class="cicon"><svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="10"/></svg></span>
+        <span class="cname">Observability</span>
+      </div>
+      <div class="stack">
+        <div class="fbox done"><span class="badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="ft">Entry-level metrics export</div></div>
+        <div class="fbox plan"><div class="ft">TT metrics exporter</div></div>
+        <div class="fbox plan"><div class="ft">Alerts + ServiceMonitor</div></div>
+        <div class="fbox plan"><div class="ft">TT Grafana dashboards</div></div>
+      </div>
+    </div>
+
+    <!-- 03 -->
+    <div class="col">
+      <div class="num">03</div>
+      <div class="dotband"><span class="dot"></span></div>
+      <div class="horizon">Later</div>
+      <div class="cathead">
+        <span class="cicon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22" x2="12" y2="12"/></svg></span>
+        <span class="cname">Platform &amp; Operator</span>
+      </div>
+      <div class="stack">
+        <div class="fbox plan"><div class="ft">TT Node Feature Discovery</div></div>
+        <div class="fbox plan"><div class="ft">Driver &amp; firmware mgmt</div></div>
+        <div class="fbox plan"><div class="ft">Container-runtime integration</div></div>
+        <div class="fbox plan"><div class="ft">TT K8s Operator</div></div>
+        <div class="fbox plan"><div class="ft">Security hardening</div></div>
+        <div class="fbox plan"><div class="ft">Multi-class validation &amp; conformance</div></div>
+      </div>
+    </div>
+
+    <!-- 04 -->
+    <div class="col">
+      <div class="num">04</div>
+      <div class="dotband"><span class="dot"></span></div>
+      <div class="horizon">Future</div>
+      <div class="cathead">
+        <span class="cicon"><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg></span>
+        <span class="cname">Advanced Scheduling · DRA</span>
+      </div>
+      <div class="stack">
+        <div class="fbox plan"><div class="ft">TT DRA driver</div></div>
+        <div class="fbox plan"><div class="ft">Device sharing / partitioning</div></div>
+        <div class="fbox plan"><div class="ft">Topology-aware allocation</div></div>
+        <div class="fbox plan"><div class="ft">Multi-host scale-out</div></div>
+      </div>
+    </div>
+
+  </div>
+  </div>
+
+  <div class="legend">
+    <span class="key k-done"><span class="sw"></span>Completed</span>
+    <span class="key k-plan"><span class="sw"></span>Planned</span>
+  </div>
+
+  <p class="principle">
+    <b>Guiding principle</b> — the device plugin stays the stable, widely-compatible baseline; CDI is the injection substrate that bridges to the future; advanced sharing / partitioning rides the <b>DRA</b> track rather than device-plugin-era time-slicing that DRA supersedes.
+  </p>
+</div>
+
+</body>
+</html>

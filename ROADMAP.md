@@ -4,6 +4,8 @@ Direction for the Tenstorrent Kubernetes device plugin. Grounded in how the
 established vendor plugins (NVIDIA, AMD, Intel) actually work and in the
 Kubernetes ecosystem's shift toward Dynamic Resource Allocation (DRA).
 
+> One-page visual summary: [`docs/roadmap.html`](docs/roadmap.html) — open in a browser.
+
 ## Guiding principle
 
 Keep the **device plugin** as the stable, widely-compatible baseline; treat
@@ -52,9 +54,10 @@ flowchart LR
 - Core API: registration, `ListAndWatch`, `Allocate`, `GetDevicePluginOptions`, stubs for `GetPreferredAllocation` / `PreStartContainer`.
 - Health with **auto-recovery** (temp threshold + ARC heartbeat, re-evaluated every 30s) — better than NVIDIA's documented non-recovery on XID.
 - **CDI** device injection (opt-in), validated end-to-end on containerd 2.x.
-- Topology/NUMA hints, multiple resource classes (n150/n300/blackhole/grayskull).
-- Hardened, **non-privileged** security context (drop ALL caps, read-only rootfs).
-- Helm chart, `dev-deploy.sh` CI-mirroring dev loop, hardware verifier.
+- **Entry-level Prometheus `/metrics`** — per-device health/temperature + per-class device/allocation counters, validated live on n150.
+- Multiple resource classes discovered by card type (n150/n300/blackhole/grayskull).
+- **Non-privileged** security context (drop ALL caps, read-only rootfs) — initial hardening.
+- Helm chart, `dev-deploy.sh` dev loop, hardware verifier.
 
 ---
 
@@ -77,50 +80,87 @@ time-slicing.
 
 ```mermaid
 flowchart TB
-  subgraph PH1["Phase 1 — Device plugin baseline (now)"]
-    M["Prometheus metrics /metrics"]
-    B["(everything else already at parity)"]
+  subgraph PH1["Phase 1 — Baseline (done)"]
+    A["Core device-plugin API"]
+    DISC["Dynamic discovery & allocation"]
+    CDI["CDI injection"]
+    HL["Health + auto-recovery"]
+    HELM["Helm packaging"]
   end
-  subgraph PH2["Phase 2 — TT operator"]
-    NFD["NFD / node labeling"]
-    LC["Lifecycle mgmt<br/>(install, upgrade, config)"]
+  subgraph PH2["Phase 2 — Observability"]
+    MET["Entry-level metrics (done)"]
+    EXP["TT metrics exporter"]
+    ALR["Alerts + ServiceMonitor"]
+    GRAF["Grafana dashboards"]
   end
-  subgraph PH3["Phase 3 — DRA track (parallel)"]
-    DRV["TT DRA driver"]
-    SH["Device sharing / partitioning<br/>(if hardware supports)"]
+  subgraph PH3["Phase 3 — Platform & Operator"]
+    NFD["TT Node Feature Discovery"]
+    DRVM["Driver + firmware mgmt"]
+    RT["Container-runtime integration"]
+    OP["TT K8s Operator"]
+    SEC["Security hardening"]
+    MC["Multi-class validation"]
   end
-  PH1 --> PH2
-  PH1 -.->|reuses CDI| PH3
-  PH2 -.->|bundles| PH3
+  subgraph PH4["Phase 4 — Advanced scheduling · DRA"]
+    DRA["TT DRA driver"]
+    SH["Device sharing / partitioning"]
+    TOP["Topology-aware allocation"]
+    MH["Multi-host scale-out"]
+  end
+  PH1 --> PH2 --> PH3
+  PH1 -.->|reuses CDI| PH4
+  PH3 -.->|operator bundles| PH4
 
-  classDef now fill:#dcfce7,stroke:#16a34a,color:#14532d;
-  classDef soon fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+  classDef done fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef prog fill:#fef3c7,stroke:#d97706,color:#78350f;
   classDef later fill:#ede9fe,stroke:#7c3aed,color:#4c1d95;
-  class M,B now;
-  class NFD,LC soon;
-  class DRV,SH later;
+  class A,DISC,CDI,HL,HELM,MET done;
+  class EXP,ALR,GRAF prog;
+  class NFD,DRVM,RT,OP,SEC,MC,DRA,SH,TOP,MH later;
 ```
 
-### Phase 1 — Device plugin baseline (now)
+Scope was cross-checked against the **NVIDIA GPU Operator**, **AMD ROCm** and
+**Intel device-plugin** stacks so nothing an established vendor ships is missed;
+items marked ⭐ are additions surfaced by that cross-check.
+
+### Phase 1 — Device plugin baseline ✅ done
+
+| Feature | Status | Rationale |
+|---------|:------:|-----------|
+| Core device-plugin API | ✅ | Registration, `ListAndWatch`, `Allocate`, options + stubs. |
+| Dynamic discovery & allocation | ✅ | Scans `/dev` + sysfs, serves devices to kubelet, injects on `Allocate`. |
+| CDI injection (opt-in) | ✅ | Validated end-to-end on containerd 2.x; the bridge to DRA. |
+| Health with auto-recovery | ✅ | Temp threshold + ARC heartbeat, 30s re-eval. Beyond NVIDIA parity. |
+| Helm packaging | ✅ | Chart for DaemonSet deploy. |
+
+### Phase 2 — Observability
 
 | Feature | Priority | Rationale |
 |---------|:--------:|-----------|
-| **Prometheus metrics** endpoint | 🔥 High | The only non-scale-gated gap every vendor fills. Export per-device temp/health/heartbeat so failures are visible without `kubectl logs`. Contained: a `/metrics` server over what `checkHealth` already reads. |
-| Richer health signals (ECC / PCIe errors) | Low | Opportunistic — add if TT sysfs exposes error counters worth watching. |
+| **Entry-level metrics export** | ✅ done | Per-device health/temperature + per-class device/allocation counters over `/metrics`, validated live on n150. |
+| **TT metrics exporter** | 🔥 High | DCGM-style telemetry (power, voltage, current, clocks, PCIe errors). Verified present in n150 sysfs. Splits deep telemetry out of the plugin, mirroring DCGM-exporter / device-metrics-exporter. |
+| **Alerts + ServiceMonitor** ⭐ | Medium | `PrometheusRule` + `ServiceMonitor` so failures page, not just graph. |
+| **Grafana dashboards** | Medium | Fleet health / temperature / utilization panels over the exporter. |
 
-### Phase 2 — TT operator
-
-| Feature | Priority | Rationale |
-|---------|:--------:|-----------|
-| **NFD / node labeling** | Medium | Label nodes with card type / firmware / count so schedulers can target hardware. Bundle NFD in the operator (NVIDIA-style). Only matters with heterogeneous nodes. |
-| Lifecycle management | Medium | Operator owns install/upgrade/config of the plugin + NFD + (later) DRA driver. |
-
-### Phase 3 — DRA track (parallel to the operator)
+### Phase 3 — Platform & operator
 
 | Feature | Priority | Rationale |
 |---------|:--------:|-----------|
-| **TT DRA driver** | Medium | The strategic bet. Reuses existing CDI specs. Gate adoption on the minimum K8s version TT must support (DRA needs ≥1.34). `DRAExtendedResource` (KEP-5004) lets a DRA driver still serve classic `tenstorrent.com/n150: 1` requests. |
+| **TT Node Feature Discovery** | Medium | Label nodes with card type / firmware / count / topology so schedulers target hardware. NVIDIA-style GFD over NFD. |
+| **Driver + firmware management** ⭐ | Medium | Operator-managed `tt-kmd` install/upgrade and `tt-flash` firmware, like NVIDIA/AMD driver containers. |
+| **Container-runtime integration** | Medium | Managed CDI enablement for containerd / CRI-O (the `nvidia-container-toolkit` equivalent). |
+| **TT K8s Operator** | Medium | Owns install/upgrade/config of plugin + NFD + exporter + driver (+ later DRA). |
+| **Security hardening** ⭐ | Medium | Complete the non-privileged posture: least-privilege RBAC, seccomp, image scanning, full review. Only initial hardening exists today. |
+| **Multi-class validation & conformance** ⭐ | Medium | Validate discovery/health/allocation across n300 / Blackhole / Grayskull; fix resource-class granularity (split Blackhole into p100/p150/p300). |
+
+### Phase 4 — Advanced scheduling · DRA
+
+| Feature | Priority | Rationale |
+|---------|:--------:|-----------|
+| **TT DRA driver** | Medium | The strategic bet. Reuses existing CDI specs. Gate on the minimum K8s version TT must support (DRA needs ≥1.34). `DRAExtendedResource` (KEP-5004) lets a DRA driver still serve classic `tenstorrent.com/n150: 1` requests. |
 | **Device sharing / partitioning** | Medium | Do this **via DRA**, not device-plugin time-slicing. Gated on a hardware question: does TT silicon support partitioning (MIG-like) or tolerate oversubscription? |
+| **Topology-aware allocation** ⭐ | Medium | `GetPreferredAllocation` / NUMA + multi-ASIC locality (n300 = 2 chips, T3K = 8, Galaxy = 32). Needed the moment we leave single-n150. |
+| **Multi-host scale-out topology** ⭐ | Low | TT's distinctive axis: cards mesh over **Ethernet**. Topology-aware placement of multi-chip jobs, akin to NVIDIA's NVLink/network awareness. |
 
 ---
 
@@ -130,7 +170,7 @@ flowchart TB
 |------|----------|
 | Runtime hot-plug detection | **No major vendor does it.** Startup discovery + kubelet-restart re-discovery is the norm. Add only if a real add/remove-live requirement appears. |
 | Device-plugin time-slicing / MPS | Superseded by DRA. Building it now is throwaway work. |
-| `GetPreferredAllocation` (NUMA) | Single card reports NUMA `-1`; nothing to optimize. Revisit only for multi-card nodes. |
+| `GetPreferredAllocation` (NUMA) now | Single card reports NUMA `-1`; nothing to optimize today. Deferred to Phase 4 for multi-ASIC / multi-host. |
 
 ---
 
@@ -168,14 +208,22 @@ chiefly flexible sharing/partitioning.
 
 | Capability | NVIDIA | AMD | Intel | TT (now) | TT (planned) |
 |------------|:------:|:---:|:-----:|:--------:|:------------:|
-| Core API | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Health w/ recovery | ❌ | 🟡 | 🟡 | ✅ | ✅ |
-| CDI | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Non-privileged | 🟡 | ❌ | 🟡 | ✅ | ✅ |
-| Prometheus metrics | ✅ | ✅ | 🟡 | ❌ | ✅ P1 |
-| NFD / labeling | ✅ | ✅ | ✅ | ❌ | ✅ P2 |
-| Operator | ✅ | 🟡 | ✅ | ❌ | ✅ P2 |
-| Device sharing | ✅ | 🟡 | 🟡 | ❌ | ✅ P3 (DRA) |
-| DRA driver | ✅ | ✅ | 🟡 | ❌ | ✅ P3 |
+| Core device-plugin API | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Health w/ auto-recovery | ❌ | 🟡 | 🟡 | ✅ | ✅ |
+| CDI injection | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Non-privileged / hardened | 🟡 | ❌ | 🟡 | 🟡 | ✅ |
+| Prometheus `/metrics` | ✅ | ✅ | 🟡 | ✅ | ✅ |
+| Metrics exporter (telemetry) | ✅ | ✅ | 🟡 | 🟡 | ✅ P2 |
+| Grafana dashboards | ✅ | ✅ | 🟡 | ❌ | ✅ P2 |
+| Alerts / ServiceMonitor | ✅ | ✅ | 🟡 | ❌ | ✅ P2 |
+| NFD / node labeling | ✅ | ✅ | ✅ | ❌ | ✅ P3 |
+| Driver + firmware mgmt | ✅ | ✅ | 🟡 | ❌ | ✅ P3 |
+| Container-runtime integration | ✅ | ✅ | ✅ | 🟡 | ✅ P3 |
+| Operator (lifecycle) | ✅ | 🟡 | ✅ | ❌ | ✅ P3 |
+| Stack validator | ✅ | 🟡 | 🟡 | ❌ | ✅ P3 |
+| DRA driver | ✅ | ✅ | 🟡 | ❌ | ✅ P4 |
+| Device sharing / partitioning | ✅ | 🟡 | 🟡 | ❌ | ✅ P4 (DRA) |
+| Topology-aware allocation | ✅ | 🟡 | ✅ | ❌ | ✅ P4 |
+| Multi-host scale-out topology | ✅ | 🟡 | 🟡 | ❌ | ✅ P4 |
 
-Legend: ✅ full · 🟡 partial/experimental · ❌ none · P1/P2/P3 = target phase.
+Legend: ✅ full · 🟡 partial/experimental · ❌ none · P1–P4 = target phase.
