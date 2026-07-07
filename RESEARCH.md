@@ -256,6 +256,17 @@ So these aren't re-litigated:
 7. **DRA = strategic track** — start a DRA driver when supported K8s versions reach
    ≥1.34; it reuses the CDI specs. Gate on the minimum K8s version TT must support.
 8. **Chart `kubeVersion` = ≥1.31** — matches CDI GA availability.
+9. **No `RuntimeClass`** — unlike NVIDIA's `handler: nvidia`, we do not ship a
+   RuntimeClass. NVIDIA needs one because their injection routes pods through a
+   custom `nvidia-container-runtime` wrapper. We inject via the `Allocate`
+   response (plain `runc`) or via **CDI**, which standard containerd (≥1.7)
+   resolves natively — no custom runtime handler. A RuntimeClass whose `handler`
+   has no matching containerd `runtimes.*` entry would break pods
+   (`RunContainerError`). RuntimeClass remains orthogonal — it selects an
+   *isolation* runtime (Kata/gVisor); CDI still injects within whatever runtime.
+   The only runtime prerequisite is `enable_cdi = true`, handled by the Phase-3
+   "container-runtime integration" work, not a RuntimeClass. NVIDIA is itself
+   migrating toward CDI, so this is the modern path, not a gap.
 
 Open hardware questions to resolve before the relevant phase:
 - Does TT silicon support partitioning (MIG-like) or tolerate oversubscription?
