@@ -44,6 +44,7 @@ KEEP_IMAGES="${KEEP_IMAGES:-2}"
 IMAGE_TAG="dev-$(date +%Y%m%d-%H%M%S)"     # unique tag so helm always rolls
 TAG="${IMAGE_NAME}:${IMAGE_TAG}"
 VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo none)"
 
 DO_PROBE=1
 DO_CHECK=1
@@ -119,7 +120,7 @@ if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
   step "Loading image into minikube"; info "skipped (SKIP_BUILD)"
 else
   info "tag ${BOLD}${TAG}${RESET}"
-  run_dim docker build --build-arg "VERSION=${VERSION}" -t "${TAG}" . || fail "docker build failed"
+  run_dim docker build --build-arg "VERSION=${VERSION}" --build-arg "COMMIT=${COMMIT}" -t "${TAG}" . || fail "docker build failed"
   ok "image built"
   step "Loading image into minikube"
   minikube image load "${TAG}"

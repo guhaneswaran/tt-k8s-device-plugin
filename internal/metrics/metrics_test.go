@@ -29,7 +29,7 @@ func TestCollector(t *testing.T) {
 			{ID: "1", Healthy: false}, // unhealthy, no temperature sensor
 		},
 	}
-	c := NewCollector(func() []Source { return []Source{src} })
+	c := NewCollector(func() []Source { return []Source{src} }, "v1", "abc")
 
 	// Device 1 has HasTemp=false, so it must emit NO temperature series.
 	expected := `
@@ -50,8 +50,71 @@ tt_device_temperature_max_celsius{class="n150",device_id="0"} 75
 # TYPE tt_devices_total gauge
 tt_devices_total{class="n150"} 2
 `
-	if err := testutil.CollectAndCompare(c, strings.NewReader(expected)); err != nil {
+	names := []string{"tt_allocations_total", "tt_device_health", "tt_device_temperature_celsius", "tt_device_temperature_max_celsius", "tt_devices_total"}
+	if err := testutil.CollectAndCompare(c, strings.NewReader(expected), names...); err != nil {
 		t.Errorf("collector output mismatch:\n%v", err)
+	}
+}
+
+func TestCollectorTelemetry(t *testing.T) {
+	src := fakeSource{
+		class: "n150",
+		snaps: []plugin.DeviceSnapshot{
+			{
+				ID: "0", Healthy: true,
+				HasPower: true, PowerMicroW: 15000000, PowerMaxMicroW: 100000000,
+				HasVoltage: true, VoltageMilliV: 795,
+				HasCurrent: true, CurrentMilliA: 18000,
+				HasAiClk: true, AiClkMHz: 500,
+				// ArcClk/AxiClk absent → must not be emitted.
+				HasPcieErrors: true, PcieCorrErrors: 0,
+				HasPcieLink: true, PcieLinkGTps: 8, PcieLinkWidth: 16,
+				CardType: "n150", Serial: "S1", AsicID: "A1", FwBundle: "19.6.0.0",
+			},
+		},
+	}
+	c := NewCollector(func() []Source { return []Source{src} }, "v2", "def")
+
+	expected := `
+# HELP tt_build_info Plugin build information; constant 1 with version/commit labels.
+# TYPE tt_build_info gauge
+tt_build_info{commit="def",version="v2"} 1
+# HELP tt_device_clock_mhz Device clock frequency in MHz, by clock domain.
+# TYPE tt_device_clock_mhz gauge
+tt_device_clock_mhz{class="n150",clock="ai",device_id="0"} 500
+# HELP tt_device_current_amps Current device current draw in amperes.
+# TYPE tt_device_current_amps gauge
+tt_device_current_amps{class="n150",device_id="0"} 18
+# HELP tt_device_info Device identity; constant 1 with identity labels.
+# TYPE tt_device_info gauge
+tt_device_info{asic_id="A1",card_type="n150",class="n150",device_id="0",fw_bundle="19.6.0.0",serial="S1"} 1
+# HELP tt_device_pcie_correctable_errors_total Cumulative PCIe correctable errors (AER).
+# TYPE tt_device_pcie_correctable_errors_total counter
+tt_device_pcie_correctable_errors_total{class="n150",device_id="0"} 0
+# HELP tt_device_pcie_link_speed_gtps Current PCIe link speed in GT/s.
+# TYPE tt_device_pcie_link_speed_gtps gauge
+tt_device_pcie_link_speed_gtps{class="n150",device_id="0"} 8
+# HELP tt_device_pcie_link_width Current PCIe link width in lanes.
+# TYPE tt_device_pcie_link_width gauge
+tt_device_pcie_link_width{class="n150",device_id="0"} 16
+# HELP tt_device_power_watts Current device power draw in watts.
+# TYPE tt_device_power_watts gauge
+tt_device_power_watts{class="n150",device_id="0"} 15
+# HELP tt_device_power_max_watts Device power limit in watts.
+# TYPE tt_device_power_max_watts gauge
+tt_device_power_max_watts{class="n150",device_id="0"} 100
+# HELP tt_device_voltage_volts Current device core voltage in volts.
+# TYPE tt_device_voltage_volts gauge
+tt_device_voltage_volts{class="n150",device_id="0"} 0.795
+`
+	names := []string{
+		"tt_build_info", "tt_device_clock_mhz", "tt_device_current_amps", "tt_device_info",
+		"tt_device_pcie_correctable_errors_total", "tt_device_pcie_link_speed_gtps",
+		"tt_device_pcie_link_width", "tt_device_power_watts", "tt_device_power_max_watts",
+		"tt_device_voltage_volts",
+	}
+	if err := testutil.CollectAndCompare(c, strings.NewReader(expected), names...); err != nil {
+		t.Errorf("telemetry output mismatch:\n%v", err)
 	}
 }
 
@@ -62,7 +125,7 @@ func TestCollectorMultipleClasses(t *testing.T) {
 			{ID: "0", Healthy: true}, {ID: "1", Healthy: true},
 		}},
 	}
-	c := NewCollector(func() []Source { return sources })
+	c := NewCollector(func() []Source { return sources }, "v1", "abc")
 
 	// Only check the per-class device counts across both classes.
 	expected := `

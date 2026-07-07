@@ -22,7 +22,12 @@ import (
 	"github.com/guhaneswaran/tt-k8s-device-plugin/internal/plugin"
 )
 
-var version = "dev"
+// version and commit are set at build time via -ldflags and surface in the
+// tt_build_info metric.
+var (
+	version = "dev"
+	commit  = "none"
+)
 
 func main() {
 	klog.InitFlags(nil)
@@ -128,7 +133,7 @@ func metricsPort() string {
 // serveMetrics runs the /metrics HTTP server until ctx is cancelled.
 func serveMetrics(ctx context.Context, addr string, provider func() []metrics.Source) {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", metrics.Handler(provider))
+	mux.Handle("/metrics", metrics.Handler(provider, version, commit))
 	srv := &http.Server{Addr: addr, Handler: mux}
 
 	go func() {

@@ -48,6 +48,94 @@ func MaxTemperature(d Device) (int64, error) {
 	return readSysfsInt(filepath.Join(d.HwmonDir, "temp1_max"))
 }
 
+// Power reads the current power draw in microwatts (hwmon power1_input).
+func Power(d Device) (int64, error) {
+	return readSysfsInt(filepath.Join(d.HwmonDir, "power1_input"))
+}
+
+// PowerMax reads the power limit in microwatts (hwmon power1_max).
+func PowerMax(d Device) (int64, error) {
+	return readSysfsInt(filepath.Join(d.HwmonDir, "power1_max"))
+}
+
+// Voltage reads the core voltage in millivolts (hwmon in0_input).
+func Voltage(d Device) (int64, error) {
+	return readSysfsInt(filepath.Join(d.HwmonDir, "in0_input"))
+}
+
+// Current reads the current draw in milliamperes (hwmon curr1_input).
+func Current(d Device) (int64, error) {
+	return readSysfsInt(filepath.Join(d.HwmonDir, "curr1_input"))
+}
+
+// Clock reads a clock frequency in MHz for the given domain ("ai", "arc",
+// "axi"), i.e. the sysfs files tt_aiclk / tt_arcclk / tt_axiclk.
+func Clock(d Device, domain string) (int64, error) {
+	return readSysfsInt(filepath.Join(d.SysfsDir, "tt_"+domain+"clk"))
+}
+
+// Serial reads the card serial number from sysfs.
+func Serial(d Device) (string, error) {
+	return readSysfs(filepath.Join(d.SysfsDir, "tt_serial"))
+}
+
+// AsicID reads the ASIC identifier from sysfs.
+func AsicID(d Device) (string, error) {
+	return readSysfs(filepath.Join(d.SysfsDir, "tt_asic_id"))
+}
+
+// FwBundle reads the firmware bundle version from sysfs.
+func FwBundle(d Device) (string, error) {
+	return readSysfs(filepath.Join(d.SysfsDir, "tt_fw_bundle_ver"))
+}
+
+// PCIeCorrectableErrors reads the cumulative PCIe AER correctable error count
+// (the TOTAL_ERR_COR line of the device's aer_dev_correctable file).
+func PCIeCorrectableErrors(d Device) (uint64, error) {
+	data, err := readSysfs(filepath.Join(d.SysfsDir, "device", "aer_dev_correctable"))
+	if err != nil {
+		return 0, err
+	}
+	return parseAERTotal(data)
+}
+
+// PCIeLinkSpeedGTps reads the current PCIe link speed in GT/s (parsed from
+// e.g. "8.0 GT/s PCIe").
+func PCIeLinkSpeedGTps(d Device) (float64, error) {
+	s, err := readSysfs(filepath.Join(d.SysfsDir, "device", "current_link_speed"))
+	if err != nil {
+		return 0, err
+	}
+	return parseLinkSpeed(s)
+}
+
+// PCIeLinkWidth reads the current PCIe link width (number of lanes).
+func PCIeLinkWidth(d Device) (int64, error) {
+	return readSysfsInt(filepath.Join(d.SysfsDir, "device", "current_link_width"))
+}
+
+// parseAERTotal extracts the TOTAL_ERR_COR value from the multi-line
+// aer_dev_correctable file ("<NAME> <count>" per line).
+func parseAERTotal(s string) (uint64, error) {
+	for _, line := range strings.Split(s, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "TOTAL_ERR_COR" {
+			return strconv.ParseUint(fields[1], 10, 64)
+		}
+	}
+	return 0, fmt.Errorf("TOTAL_ERR_COR not found")
+}
+
+// parseLinkSpeed parses a PCIe link-speed string like "8.0 GT/s PCIe" into its
+// GT/s value.
+func parseLinkSpeed(s string) (float64, error) {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return 0, fmt.Errorf("empty link speed")
+	}
+	return strconv.ParseFloat(fields[0], 64)
+}
+
 // Discover returns devices grouped by resource class using the real host paths.
 func Discover() (map[string][]Device, error) {
 	return discover(devDir, sysfsBase)

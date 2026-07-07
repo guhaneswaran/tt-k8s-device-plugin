@@ -52,6 +52,36 @@ type DeviceSnapshot struct {
 	HasTemp    bool  // whether a temperature reading is available
 	TempMilliC int64 // current temperature in millidegrees Celsius
 	MaxMilliC  int64 // temperature limit in millidegrees Celsius (0 if unknown)
+
+	// Hardware telemetry, read from sysfs on each tick. Raw sysfs units are kept
+	// here (micro/milli); the metrics collector converts to base units. Each
+	// Has* flag gates emission so an absent sensor omits its series.
+	HasPower       bool
+	PowerMicroW    int64 // hwmon power1_input (microwatts)
+	PowerMaxMicroW int64 // hwmon power1_max (microwatts; 0 if unknown)
+	HasVoltage     bool
+	VoltageMilliV  int64 // hwmon in0_input (millivolts)
+	HasCurrent     bool
+	CurrentMilliA  int64 // hwmon curr1_input (milliamperes)
+
+	HasAiClk  bool
+	AiClkMHz  int64
+	HasArcClk bool
+	ArcClkMHz int64
+	HasAxiClk bool
+	AxiClkMHz int64
+
+	HasPcieErrors  bool
+	PcieCorrErrors uint64  // cumulative PCIe AER correctable errors
+	HasPcieLink    bool
+	PcieLinkGTps   float64 // current PCIe link speed (GT/s)
+	PcieLinkWidth  int64   // current PCIe link width (lanes)
+
+	// Identity (labels for tt_device_info); empty if unreadable.
+	CardType string
+	Serial   string
+	AsicID   string
+	FwBundle string
 }
 
 // Plugin implements pluginapi.DevicePluginServer for a single resource class.
@@ -433,6 +463,10 @@ func (p *Plugin) checkHealth(dev device.Device) string {
 func (p *Plugin) assess(dev device.Device) DeviceSnapshot {
 	snap := DeviceSnapshot{ID: dev.ID, Healthy: true}
 
+	// Read hardware telemetry up front so it is captured even when a later
+	// health check marks the device unhealthy and returns early.
+	readTelemetry(dev, &snap)
+
 	if dev.HwmonDir != "" {
 		temp, err := device.Temperature(dev)
 		if err != nil {
@@ -475,6 +509,66 @@ func (p *Plugin) assess(dev device.Device) DeviceSnapshot {
 	}
 
 	return snap
+}
+
+// readTelemetry fills the hardware-telemetry fields of snap from sysfs. Every
+// read is best-effort: an unreadable sensor leaves its Has* flag false so the
+// metrics collector omits that series rather than reporting a zero.
+func readTelemetry(dev device.Device, snap *DeviceSnapshot) {
+	snap.CardType = dev.CardType
+	if v, err := device.Serial(dev); err == nil {
+		snap.Serial = v
+	}
+	if v, err := device.AsicID(dev); err == nil {
+		snap.AsicID = v
+	}
+	if v, err := device.FwBundle(dev); err == nil {
+		snap.FwBundle = v
+	}
+
+	if dev.HwmonDir != "" {
+		if v, err := device.Power(dev); err == nil {
+			snap.HasPower = true
+			snap.PowerMicroW = v
+			if m, err := device.PowerMax(dev); err == nil {
+				snap.PowerMaxMicroW = m
+			}
+		}
+		if v, err := device.Voltage(dev); err == nil {
+			snap.HasVoltage = true
+			snap.VoltageMilliV = v
+		}
+		if v, err := device.Current(dev); err == nil {
+			snap.HasCurrent = true
+			snap.CurrentMilliA = v
+		}
+	}
+
+	if dev.SysfsDir != "" {
+		if v, err := device.Clock(dev, "ai"); err == nil {
+			snap.HasAiClk = true
+			snap.AiClkMHz = v
+		}
+		if v, err := device.Clock(dev, "arc"); err == nil {
+			snap.HasArcClk = true
+			snap.ArcClkMHz = v
+		}
+		if v, err := device.Clock(dev, "axi"); err == nil {
+			snap.HasAxiClk = true
+			snap.AxiClkMHz = v
+		}
+		if v, err := device.PCIeCorrectableErrors(dev); err == nil {
+			snap.HasPcieErrors = true
+			snap.PcieCorrErrors = v
+		}
+		if sp, err := device.PCIeLinkSpeedGTps(dev); err == nil {
+			if w, err := device.PCIeLinkWidth(dev); err == nil {
+				snap.HasPcieLink = true
+				snap.PcieLinkGTps = sp
+				snap.PcieLinkWidth = w
+			}
+		}
+	}
 }
 
 func removeSocket(path string) error {

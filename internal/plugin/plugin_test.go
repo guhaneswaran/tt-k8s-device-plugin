@@ -233,6 +233,68 @@ func TestAllocationsCounter(t *testing.T) {
 	}
 }
 
+func TestSnapshotReflectsTelemetry(t *testing.T) {
+	root := t.TempDir()
+	hwmon := filepath.Join(root, "hwmon")
+	pciDev := filepath.Join(root, "device")
+	for _, d := range []string{hwmon, pciDev} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(dir, name, val string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(val), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(hwmon, "temp1_input", "47000\n")
+	write(hwmon, "temp1_max", "75000\n")
+	write(hwmon, "power1_input", "15000000\n")
+	write(hwmon, "power1_max", "100000000\n")
+	write(hwmon, "in0_input", "795\n")
+	write(hwmon, "curr1_input", "18000\n")
+	write(root, "tt_aiclk", "500\n")
+	write(root, "tt_serial", "SERIAL123\n")
+	write(root, "tt_asic_id", "ASIC123\n")
+	write(root, "tt_fw_bundle_ver", "19.6.0.0\n")
+	write(pciDev, "aer_dev_correctable", "RxErr 0\nTOTAL_ERR_COR 0\n")
+	write(pciDev, "current_link_speed", "8.0 GT/s PCIe\n")
+	write(pciDev, "current_link_width", "16\n")
+
+	p := New("n150", []device.Device{{ID: "0", CardType: "n150", HwmonDir: hwmon, SysfsDir: root}})
+	p.buildDeviceList()
+
+	snaps := p.Snapshot()
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snaps))
+	}
+	s := snaps[0]
+	if !s.HasPower || s.PowerMicroW != 15000000 || s.PowerMaxMicroW != 100000000 {
+		t.Errorf("power wrong: %+v", s)
+	}
+	if !s.HasVoltage || s.VoltageMilliV != 795 {
+		t.Errorf("voltage wrong: %+v", s)
+	}
+	if !s.HasCurrent || s.CurrentMilliA != 18000 {
+		t.Errorf("current wrong: %+v", s)
+	}
+	if !s.HasAiClk || s.AiClkMHz != 500 {
+		t.Errorf("aiclk wrong: %+v", s)
+	}
+	if s.HasArcClk {
+		t.Errorf("arcclk should be absent (no sysfs file): %+v", s)
+	}
+	if !s.HasPcieErrors || s.PcieCorrErrors != 0 {
+		t.Errorf("pcie errors wrong: %+v", s)
+	}
+	if !s.HasPcieLink || s.PcieLinkGTps != 8.0 || s.PcieLinkWidth != 16 {
+		t.Errorf("pcie link wrong: %+v", s)
+	}
+	if s.CardType != "n150" || s.Serial != "SERIAL123" || s.AsicID != "ASIC123" || s.FwBundle != "19.6.0.0" {
+		t.Errorf("identity wrong: %+v", s)
+	}
+}
+
 func TestSnapshotReflectsHealth(t *testing.T) {
 	hwmon := filepath.Join(t.TempDir(), "hwmon0")
 	if err := os.MkdirAll(hwmon, 0o755); err != nil {
